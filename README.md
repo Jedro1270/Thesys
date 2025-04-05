@@ -51,6 +51,3 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## License
 
 [License information to be added]
-  },
-})
-```
