@@ -4,7 +4,7 @@ import ProjectForm from './components/ProjectForm';
 import { ThesisProject } from './types/thesis';
 import { getProjects, saveProject, deleteProject } from './utils/storage';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Box, Container, Typography, AppBar, Toolbar } from '@mui/material';
 
 function App() {

@@ -11,6 +11,7 @@ export interface ThesisChapter {
   id: string;
   title: string;
   content: string;
+  subsections: ThesisChapter[];
   createdAt: string;
   updatedAt: string;
 }

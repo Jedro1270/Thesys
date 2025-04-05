@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { ThesisProject, ThesisChapter } from "../types/thesis";
+import { Section } from "./ChapterModal";
+import { saveProject } from "../utils/storage";
+import ChapterModal from "./ChapterModal";
 import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardHeader,
   CardTitle,
   CardDescription,
 } from "@/components/ui/card";
@@ -21,6 +23,7 @@ import {
   Close as CloseIcon,
   Book as BookIcon,
   Description as DescriptionIcon,
+  Edit,
 } from "@mui/icons-material";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -37,10 +40,9 @@ export default function ProjectForm({
 }: ProjectFormProps) {
   const [title, setTitle] = useState(project?.title || "");
   const [description, setDescription] = useState(project?.description || "");
-  const [chapters, setChapters] = useState<ThesisChapter[]>(
-    project?.chapters || []
-  );
-  const [newChapterTitle, setNewChapterTitle] = useState("");
+  const [chapters, setChapters] = useState<ThesisChapter[]>(project?.chapters || []);
+  const [chapterModalOpen, setChapterModalOpen] = useState(false);
+  const [editingChapter, setEditingChapter] = useState<ThesisChapter | null>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,35 +60,90 @@ export default function ProjectForm({
     onSave(updatedProject);
   };
 
-  const addChapter = () => {
-    if (!newChapterTitle.trim()) return;
-
-    const now = new Date().toISOString();
-    const newChapter: ThesisChapter = {
-      id: crypto.randomUUID(),
-      title: newChapterTitle,
-      content: "",
-      createdAt: now,
-      updatedAt: now,
+  const addOrUpdateChapter = (chapterData: { id?: string; title: string; content: string; subsections: Section[] }) => {
+    const addTimestampsToSubsections = (sections: Section[]): ThesisChapter[] => {
+      const now = new Date().toISOString();
+      return sections.map(section => ({
+        id: section.id,
+        title: section.title,
+        content: section.content,
+        subsections: addTimestampsToSubsections(section.subsections),
+        createdAt: now,
+        updatedAt: now,
+      }));
     };
+    const now = new Date().toISOString();
 
-    setChapters([...chapters, newChapter]);
-    setNewChapterTitle("");
+    if (chapterData.id) {
+      // Update existing chapter
+      const updatedChapters = chapters.map(ch => 
+        ch.id === chapterData.id 
+          ? {
+              ...ch,
+              title: chapterData.title,
+              content: chapterData.content,
+              subsections: addTimestampsToSubsections(chapterData.subsections),
+              updatedAt: now,
+            }
+          : ch
+      );
+      setChapters(updatedChapters);
+      
+      // Save to storage
+      if (project) {
+        saveProject({
+          ...project,
+          chapters: updatedChapters,
+          updatedAt: now,
+        });
+      }
+    } else {
+      // Add new chapter
+      const newChapter: ThesisChapter = {
+        id: crypto.randomUUID(),
+        title: chapterData.title,
+        content: chapterData.content,
+        subsections: addTimestampsToSubsections(chapterData.subsections),
+        createdAt: now,
+        updatedAt: now,
+      };
+      const updatedChapters = [...chapters, newChapter];
+      setChapters(updatedChapters);
+      
+      // Save to storage
+      if (project) {
+        saveProject({
+          ...project,
+          chapters: updatedChapters,
+          updatedAt: now,
+        });
+      }
+    }
+    
+    setEditingChapter(null);
   };
 
   const removeChapter = (chapterId: string) => {
-    setChapters(chapters.filter((chapter) => chapter.id !== chapterId));
+    const updatedChapters = chapters.filter((chapter) => chapter.id !== chapterId);
+    setChapters(updatedChapters);
+    
+    // Save to storage
+    if (project) {
+      saveProject({
+        ...project,
+        chapters: updatedChapters,
+        updatedAt: new Date().toISOString(),
+      });
+    }
   };
 
   return (
     <form onSubmit={handleSubmit} className="px-4 py-8">
       <Card sx={{ maxWidth: "md", mx: "auto" }}>
-        <CardHeader>
-          <CardTitle>{project ? "Edit Project" : "New Project"}</CardTitle>
-          <CardDescription>
-            Create a new thesis project and organize your chapters
-          </CardDescription>
-        </CardHeader>
+        <CardTitle>{project ? "Edit Project" : "New Project"}</CardTitle>
+        <CardDescription>
+          Create a new thesis project and organize your chapters
+        </CardDescription>
         <CardContent>
           <Stack spacing={3}>
             {/* Title Field */}
@@ -151,27 +208,21 @@ export default function ProjectForm({
 
               {/* Add Chapter Form */}
               <Box sx={{ display: "flex", gap: 1, mb: 2 }}>
-                <TextField
-                  fullWidth
-                  size="small"
-                  value={newChapterTitle}
-                  onChange={(e) => setNewChapterTitle(e.target.value)}
-                  placeholder="Enter chapter title"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      addChapter();
-                    }
-                  }}
-                />
-                <Button
-                  type="button"
-                  onClick={addChapter}
-                  variant="secondary"
-                  startIcon={<AddIcon />}
-                >
+                <Button onClick={() => {
+                  setEditingChapter(null);
+                  setChapterModalOpen(true);
+                }}>
                   Add Chapter
                 </Button>
+                <ChapterModal
+                  open={chapterModalOpen}
+                  onClose={() => {
+                    setChapterModalOpen(false);
+                    setEditingChapter(null);
+                  }}
+                  onSave={addOrUpdateChapter}
+                  initialChapter={editingChapter || undefined}
+                />
               </Box>
 
               {/* Chapters List */}
@@ -222,18 +273,35 @@ export default function ProjectForm({
                               />
                               <Typography>{chapter.title}</Typography>
                             </Box>
-                            <IconButton
-                              size="small"
-                              onClick={() => removeChapter(chapter.id)}
-                              sx={{
-                                opacity: 0,
-                                transition: "0.2s",
-                                "&:hover": { color: "error.main" },
-                                ".MuiBox-root:hover &": { opacity: 1 },
-                              }}
-                            >
-                              <CloseIcon fontSize="small" />
-                            </IconButton>
+                            <Box sx={{ ml: "auto", display: "flex", gap: 1 }}>
+                              <IconButton
+                                size="small"
+                                onClick={() => {
+                                  setEditingChapter(chapter);
+                                  setChapterModalOpen(true);
+                                }}
+                                sx={{
+                                  opacity: 0,
+                                  transition: "0.2s",
+                                  "&:hover": { color: "primary.main" },
+                                  ".MuiBox-root:hover &": { opacity: 1 },
+                                }}
+                              >
+                                <Edit fontSize="small" />
+                              </IconButton>
+                              <IconButton
+                                size="small"
+                                onClick={() => removeChapter(chapter.id)}
+                                sx={{
+                                  opacity: 0,
+                                  transition: "0.2s",
+                                  "&:hover": { color: "error.main" },
+                                  ".MuiBox-root:hover &": { opacity: 1 },
+                                }}
+                              >
+                                <CloseIcon fontSize="small" />
+                              </IconButton>
+                            </Box>
                           </Box>
                         </motion.div>
                       ))}
