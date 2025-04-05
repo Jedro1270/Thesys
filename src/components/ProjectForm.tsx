@@ -222,6 +222,8 @@ export default function ProjectForm({
                   }}
                   onSave={addOrUpdateChapter}
                   initialChapter={editingChapter || undefined}
+                  projectTitle={title}
+                  projectDescription={description}
                 />
               </Box>
 

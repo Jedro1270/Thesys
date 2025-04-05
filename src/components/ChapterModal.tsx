@@ -11,16 +11,31 @@ import {
   ListItem,
   Box,
   Typography,
-  Switch,
+  CircularProgress,
   FormControlLabel,
+  Switch,
 } from "@mui/material";
-import { Add as AddIcon, Delete as DeleteIcon } from "@mui/icons-material";
+import {
+  Add as AddIcon,
+  Delete as DeleteIcon,
+  AutoAwesome as AutoAwesomeIcon,
+} from "@mui/icons-material";
+import { generateSubsectionContent } from "../lib/agents/thesis-graph";
+import GenerationProgress from "./GenerationProgress";
+import { SubsectionContent } from "../lib/agents/types";
 
 export interface Section {
   id: string;
   title: string;
   content: string;
   subsections: Section[];
+  isGenerating?: boolean;
+  generationStatus?:
+    | "researching"
+    | "writing"
+    | "proofreading"
+    | "reviewing"
+    | "complete";
 }
 
 interface ChapterModalProps {
@@ -38,17 +53,23 @@ interface ChapterModalProps {
     content: string;
     subsections: Section[];
   };
+  projectTitle: string;
+  projectDescription: string;
+}
+
+interface SubsectionItemProps {
+  section: Section;
+  onUpdate: (updatedSection: Section) => void;
+  onDelete: () => void;
+  onGenerate?: () => Promise<void>;
 }
 
 const SubsectionItem = ({
   section,
   onUpdate,
   onDelete,
-}: {
-  section: Section;
-  onUpdate: (updatedSection: Section) => void;
-  onDelete: () => void;
-}) => {
+  onGenerate,
+}: SubsectionItemProps) => {
   const [newSubsectionTitle, setNewSubsectionTitle] = useState("");
 
   const handleAddSubsection = () => {
@@ -92,10 +113,30 @@ const SubsectionItem = ({
         }}
       >
         <Typography variant="subtitle1">{section.title}</Typography>
-        <IconButton edge="end" onClick={onDelete} color="error" size="small">
-          <DeleteIcon />
-        </IconButton>
+        <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
+          {onGenerate && (
+            <IconButton
+              size="small"
+              onClick={onGenerate}
+              disabled={section.isGenerating}
+              color="primary"
+            >
+              {section.isGenerating ? (
+                <CircularProgress size={20} />
+              ) : (
+                <AutoAwesomeIcon />
+              )}
+            </IconButton>
+          )}
+          <IconButton size="small" onClick={onDelete}>
+            <DeleteIcon />
+          </IconButton>
+        </Box>
       </Box>
+
+      {section.isGenerating && section.generationStatus && (
+        <GenerationProgress status={section.generationStatus} />
+      )}
 
       <TextField
         label="Content"
@@ -152,22 +193,29 @@ const SubsectionItem = ({
   );
 };
 
-const getSubsectionsContent = (sections: Section[], level: number = 0): string => {
-  const indent = '  '.repeat(level);
-  const contentIndent = '  '.repeat(level + 1);
-  
+const getSubsectionsContent = (
+  sections: Section[],
+  level: number = 0
+): string => {
+  const indent = "  ".repeat(level);
+
   return sections
     .map((section) => {
-      const subsectionContent = getSubsectionsContent(section.subsections, level + 1);
       const contentLines = section.content
-        .split('\n')
-        .map(line => `${contentIndent}${line}`)
-        .join('\n');
-      
-      return `${indent}${section.title}:
-${contentLines}${subsectionContent ? `\n${subsectionContent}` : ''}`;
+        .split("\n")
+        .map((line) => `${indent}  ${line}`)
+        .join("\n");
+
+      const subsectionContent =
+        section.subsections.length > 0
+          ? getSubsectionsContent(section.subsections, level + 1)
+          : "";
+
+      return `${indent}${section.title}:\n${contentLines}${
+        subsectionContent ? `\n${subsectionContent}` : ""
+      }`;
     })
-    .join('\n\n');
+    .join("\n\n");
 };
 
 export default function ChapterModal({
@@ -175,12 +223,66 @@ export default function ChapterModal({
   onClose,
   onSave,
   initialChapter,
+  projectTitle,
+  projectDescription,
 }: ChapterModalProps) {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [subsections, setSubsections] = useState<Section[]>([]);
-  const [newSubsectionTitle, setNewSubsectionTitle] = useState("");
   const [isAutoUpdatingContent, setIsAutoUpdatingContent] = useState(false);
+  const [newSubsectionTitle, setNewSubsectionTitle] = useState("");
+
+  useEffect(() => {
+    if (open && initialChapter) {
+      setTitle(initialChapter.title);
+      setContent(initialChapter.content);
+      setSubsections(initialChapter.subsections);
+    }
+  }, [open, initialChapter]);
+
+  useEffect(() => {
+    if (!open) {
+      setTitle("");
+      setContent("");
+      setSubsections([]);
+      setNewSubsectionTitle("");
+      setIsAutoUpdatingContent(false);
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (isAutoUpdatingContent) {
+      const updatedContent = getSubsectionsContent(subsections);
+      setContent(updatedContent);
+    }
+  }, [subsections, isAutoUpdatingContent]);
+
+  const handleUpdateSection = (updatedSection: Section) => {
+    setSubsections((prevSubsections) =>
+      prevSubsections.map((section) =>
+        section.id === updatedSection.id ? updatedSection : section
+      )
+    );
+  };
+
+  const handleDeleteSection = (sectionId: string) => {
+    setSubsections((prevSubsections) =>
+      prevSubsections.filter((section) => section.id !== sectionId)
+    );
+  };
+
+  const handleAddSubsection = () => {
+    if (newSubsectionTitle.trim()) {
+      const newSection: Section = {
+        id: crypto.randomUUID(),
+        title: newSubsectionTitle,
+        content: "",
+        subsections: [],
+      };
+      setSubsections([...subsections, newSection]);
+      setNewSubsectionTitle("");
+    }
+  };
 
   useEffect(() => {
     if (initialChapter) {
@@ -203,29 +305,44 @@ export default function ChapterModal({
     }
   }, [subsections, isAutoUpdatingContent]);
 
-  const handleAddSubsection = () => {
-    if (newSubsectionTitle.trim()) {
-      setSubsections([
-        ...subsections,
-        {
-          id: crypto.randomUUID(),
-          title: newSubsectionTitle,
-          content: "",
-          subsections: [],
-        },
-      ]);
-      setNewSubsectionTitle("");
+  const handleGenerate = async (section: Section) => {
+
+    const updatedSection = {
+      ...section,
+      isGenerating: true,
+      generationStatus: "researching" as const,
+    };
+    handleUpdateSection(updatedSection);
+
+    try {
+      const subsectionContent: SubsectionContent = {
+        id: section.id,
+        title: section.title,
+        content: "",
+      };
+
+      const result = await generateSubsectionContent(
+        "", // API key not needed for Llama
+        title,
+        subsectionContent,
+        [], // requirements
+        projectTitle, // research title
+        projectDescription, // research description
+      );
+
+      handleUpdateSection({
+        ...section,
+        content: result.content,
+        isGenerating: false,
+        generationStatus: "complete" as const,
+      });
+    } catch (error) {
+      console.error("Error generating content:", error);
+      handleUpdateSection({
+        ...section,
+        isGenerating: false,
+      });
     }
-  };
-
-  const handleUpdateSubsection = (index: number, updatedSection: Section) => {
-    const newSubsections = [...subsections];
-    newSubsections[index] = updatedSection;
-    setSubsections(newSubsections);
-  };
-
-  const handleDeleteSubsection = (index: number) => {
-    setSubsections(subsections.filter((_, i) => i !== index));
   };
 
   const handleSave = () => {
@@ -235,7 +352,7 @@ export default function ChapterModal({
       content,
       subsections,
     });
-    handleClose();
+    onClose();
   };
 
   const handleClose = () => {
@@ -243,16 +360,12 @@ export default function ChapterModal({
     setContent("");
     setSubsections([]);
     setNewSubsectionTitle("");
+    setIsAutoUpdatingContent(false);
     onClose();
   };
 
   return (
-    <Dialog 
-      open={open} 
-      onClose={handleClose} 
-      maxWidth="md" 
-      fullWidth 
-    >
+    <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth>
       <DialogTitle>{initialChapter ? "Edit" : "Add New"} Chapter</DialogTitle>
       <DialogContent>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 1 }}>
@@ -269,7 +382,7 @@ export default function ChapterModal({
           </Typography>
 
           <List>
-            {subsections.map((subsection, index) => (
+            {subsections.map((subsection) => (
               <ListItem
                 key={subsection.id}
                 sx={{
@@ -282,9 +395,11 @@ export default function ChapterModal({
                 }}
               >
                 <SubsectionItem
+                  key={subsection.id}
                   section={subsection}
-                  onUpdate={(updated) => handleUpdateSubsection(index, updated)}
-                  onDelete={() => handleDeleteSubsection(index)}
+                  onUpdate={handleUpdateSection}
+                  onDelete={() => handleDeleteSection(subsection.id)}
+                  onGenerate={() => handleGenerate(subsection)}
                 />
               </ListItem>
             ))}
@@ -308,7 +423,7 @@ export default function ChapterModal({
             </IconButton>
           </Box>
 
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
             <FormControlLabel
               control={
                 <Switch
@@ -316,7 +431,10 @@ export default function ChapterModal({
                   onChange={(e) => {
                     setIsAutoUpdatingContent(e.target.checked);
                     if (e.target.checked && subsections.length > 0) {
-                      const subsectionsContent = getSubsectionsContent(subsections, 0);
+                      const subsectionsContent = getSubsectionsContent(
+                        subsections,
+                        0
+                      );
                       setContent(subsectionsContent);
                     }
                   }}
